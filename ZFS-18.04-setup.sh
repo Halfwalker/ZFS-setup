@@ -278,6 +278,10 @@ EOF
 mount --rbind /dev  /mnt/dev
 mount --rbind /proc /mnt/proc
 mount --rbind /sys  /mnt/sys
+# Make the mounts rslaves to make umounting later cleaner
+mount –make-rslave /mnt/dev
+mount –make-rslave /mnt/proc
+mount –make-rslave /mnt/sys
 
 echo "Creating Setup.sh in new system for chroot"
 cat > /mnt/root/Setup.sh << __EOF__
