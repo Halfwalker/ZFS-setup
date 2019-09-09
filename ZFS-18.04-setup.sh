@@ -364,8 +364,11 @@ fi # UEFI
     apt-get --yes install grub-pc
 
 # Install basic packages
+# jmespath stuff needed for ansible json filters - have to be installed *before*
+# running ansible - can't install via a task since that ansible run won't see
+# the newly installed jmes stuff
 apt-get --no-install-recommends --yes install expect most vim-nox rsync whois gdisk \
-    openssh-server
+    openssh-server python3-jmespath python-jmespath
 
 # Enable importing bpool
 cat >> /etc/systemd/system/zfs-import-bpool.service << 'EOF'
