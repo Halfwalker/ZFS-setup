@@ -89,13 +89,14 @@ HWE="-hwe-${SUITENUM}"
 rm -f /root/ZFS-setup.log
 exec > >(tee -a "/root/ZFS-setup.log") 2>&1
 
+# Clear disk *before* install zfs
+sgdisk --zap-all ${DISK}
+sgdisk --clear ${DISK}
+
 apt-get update
 apt-get --no-install-recommends --yes install software-properties-common
 apt-add-repository universe
 apt-get --no-install-recommends --yes install openssh-server debootstrap gdisk zfs-initramfs
-
-# Clear partition table
-sgdisk --zap-all ${DISK}
 
 # Legacy (BIOS) booting
 sgdisk -a1 -n1:24K:+1000K -c1:"GRUB" -t1:EF02 ${DISK}
@@ -361,7 +362,7 @@ if [ "${UEFI}" = "y" ] ; then
     apt-get install --yes grub-efi-amd64-signed shim-signed
 fi # UEFI
     # Grub for legacy BIOS
-    apt-get --yes install grub-pc
+apt-get --yes install grub-pc
 
 # Install basic packages
 # jmespath stuff needed for ansible json filters - have to be installed *before*
@@ -445,6 +446,12 @@ fi # UEFI
     grub-install --target=i386-pc ${DISK}
 
 apt-get --yes dist-upgrade
+
+# Install acpi support
+if [ -d /proc/acpi ] ; then
+    apt-get --yes install acpi acpid
+    service acpid stop
+fi # acpi
 
 # Create user
 useradd -c "${UCOMMENT}" -p $(echo "${UPASSWORD}" | mkpasswd -m sha-512 --stdin) -M --home-dir /home/${USERNAME} --user-group --groups adm,cdrom,dip,lpadmin,plugdev,sambashare,sudo --shell /bin/bash ${USERNAME}
