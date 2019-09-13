@@ -70,12 +70,12 @@ LUKS=n
 HWE=n
 HIBERNATE=n
 # Set basic options for install
-whiptail --title "Set options to install" --separate-output --checklist "Choose options" 20 65 4 \
+whiptail --title "Set options to install" --separate-output --checklist "Choose options" 20 65 6 \
     DESKTOP "Install full Ubuntu desktop" OFF \
     UEFI "Enable UEFI grub install" $( [ -d /sys/firmware/efi ] && echo ON || echo OFF ) \
     LUKS "Enable full disk encryption" OFF \
     HWE "Install Hardware Enablement kernel" ON \
-    HIBERNATE "Enable swap partition\n for hibernation" OFF 2>"${TMPFILE}"
+    HIBERNATE "Enable swap partition for hibernation" OFF 2>"${TMPFILE}"
 cat "${TMPFILE}"
 while read -r TODO ; do
     OPTION="${TODO}"
