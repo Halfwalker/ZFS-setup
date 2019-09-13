@@ -1,12 +1,20 @@
 #!/bin/bash
 
+# Shortened url direct to script : https://shorturl.at/AFHV2
+
 if [[ $EUID -ne 0 ]]; then
     echo "This script must be run as root" 1>&2
     exit 1
 fi
 
+# No magenta overrides for whiptail dialogs please
+export NEWT_COLORS="none"
+
 # If there's a local apt-cacher-ng setup, use for speed
 PROXY="http://192.168.2.104:3142/"
+PROXY=$(whiptail --inputbox "Enter an apt proxy. Cancel or hit <esc> for no proxy" --title "APT proxy setup" 8 70 $(echo $PROXY) 3>&1 1>&2 2>&3)
+RET=${?}
+(( RET )) && PROXY=
 if [ ${PROXY} ]; then
     export http_proxy=${PROXY}
     export ftp_proxy=${PROXY}
@@ -14,54 +22,100 @@ if [ ${PROXY} ]; then
     echo 'Acquire::http::proxy "${PROXY}";' > /etc/apt/apt.conf.d/03proxy
 fi # PROXY
 
+# Get userid and full name of main user
 USERNAME=datto
-UPASSWORD=password
-UCOMMENT="datto user password"
+UCOMMENT="Full name goes here"
+USERINFO=$(whiptail --inputbox "Enter username (login id) and full name of user\n\nlogin full name here\n|---| |------------ - - -  -  -" --title "User information" 11 70 "$(echo $USERNAME $UCOMMENT)" 3>&1 1>&2 2>&3)
+USERNAME=$(echo $USERINFO | cut -d' ' -f1)
+UCOMMENT=$(echo $USERINFO | cut -d' ' -f2-)
 
-# Set main disk here - be sure to include the FULL path
-DISK=/dev/disk/by-id/
-if [ "${DISK}" = "/dev/disk/by-id/" ] ; then
-    echo "======================================================="
-    echo "= Must edit DISK variable"
-    echo "======================================================="
+# Get password, confirm and loop until confirmation OK
+DONE=false
+until ${DONE} ; do
+    PW1=$(whiptail --passwordbox "Please enter a password for user $(echo $USERNAME)" 8 70 --title "User password" 3>&1 1>&2 2>&3)
+    PW2=$(whiptail --passwordbox "Please re-enter the password to confirm" 8 70 --title "User password confirmation" 3>&1 1>&2 2>&3)
+    [ "$PW1" = "$PW2" ] && DONE=true
+done
+UPASSWORD="$PW1"
+
+# Hostname - cancel or blank name will exit
+HOSTNAME=dattotest
+HOSTNAME=$(whiptail --inputbox "Enter hostname to be used for new system" --title "Hostname for new system" 8 70 $(echo $HOSTNAME) 3>&1 1>&2 2>&3)
+RET=${?}
+(( RET )) && HOSTNAME=
+if [ ! ${HOSTNAME} ]; then
+    echo "Must have a hostname" 
     exit 1
 fi
 
-# Hostname
-HOSTNAME=dattotest
+# Set main disk here - be sure to include the FULL path
+# Get list of disks, ask user which one to install to
+# Ignore cdrom etc.
+readarray -t disks <<< $(ls -l /dev/disk/by-id | egrep -v '(CDROM|CDRW|-ROM|CDDVD|-part|md-|dm-|wwn-)' | sort -t '/' -k3 | tr -s " " | cut -d' ' -f9 | sed '/^$/d')
 
-# Using UEFI or not ?
-UEFI=y
+TMPFILE=$(mktemp)
+whiptail --title "List of disks" --radiolist --noitem \
+    "Choose disk to install to" 20 70 12 \
+    $( for disk in $(seq 0 $(( ${#disks[@]}-1)) ) ; do echo "${disks[${disk}]}" OFF ; done) 2> "${TMPFILE}"
+read -r DISK < ${TMPFILE}
+if [ "${DISK}" = "" ] ; then
+    echo "Must choose disk"
+    exit 1
+fi
+DISK="/dev/disk/by-id/${DISK}"
 
-# Encrypted ?
-LUKS=y
-# Please make this a good passphrase for the disk encryption
-PASSPHRASE=password
+DESKTOP=n
+UEFI=n
+LUKS=n
+HWE=n
+HIBERNATE=n
+# Set basic options for install
+whiptail --title "Set options to install" --separate-output --checklist "Choose options" 20 65 4 \
+    DESKTOP "Install full Ubuntu desktop" OFF \
+    UEFI "Enable UEFI grub install" $( [ -d /sys/firmware/efi ] && echo ON || echo OFF ) \
+    LUKS "Enable full disk encryption" OFF \
+    HWE "Install Hardware Enablement kernel" ON \
+    HIBERNATE "Enable swap partition\n for hibernation" OFF 2>"${TMPFILE}"
+cat "${TMPFILE}"
+while read -r TODO ; do
+    OPTION="${TODO}"
+    eval "${TODO}"='y'
+done < "${TMPFILE}"
 
-# Install ubuntu desktop ?  If set to y then will essentially do
-# apt-get --yes install ubuntu-desktop
-DESKTOP=y
-
-# Enable hibernation ?  Creates a swap partition, which can be encrypted.
-HIBERNATE=y
 # We check /sys/power/state - if no "disk" in there, then HIBERNATE is disabled
 cat /sys/power/state | fgrep disk
-RET=${?}
-(( RET )) && HIBERNATE=n
+if [ ${?} -ne 0 ] ; then
+    whiptail --title "Hibernate not available" --msgbox "The /sys/power/state file does not contain 'disk', so hibernate to disk is not available" 8 70
+    HIBERNATE=n
+fi
 
-# Swap size - if LUKS enabled then this will be an encrypted partition.  If not
+# If LUKS enabled, need a passphrase
+if [ "${LUKS}" = "y" ] ; then
+    DONE=false
+    until ${DONE} ; do
+        PW1=$(whiptail --passwordbox "Please enter a good long LUKS encryption passphrase" 8 70 --title "LUKS passphrase" 3>&1 1>&2 2>&3)
+        PW2=$(whiptail --passwordbox "Please re-enter the LUKS encryption passphrase" 8 70 --title "LUKS passphrase confirmation" 3>&1 1>&2 2>&3)
+        [ "$PW1" = "$PW2" ] && DONE=true
+    done
+    PASSPHRASE="$PW1"
+fi
+
+# Swap size - if HIBERNATE enabled then this will be an actual disk partition.  
+# If LUKS defined then partition will be encrypted.  If SIZE_SWAP is not
 # defined here, then will be calculated to accomodate memory size (plus fudge factor).
-SIZE_SWAP=
-# Calculate proper SWAP size (if not defined above) - should be same size as total RAM in system
 MEMTOTAL=$(cat /proc/meminfo | fgrep MemTotal | tr -s ' ' | cut -d' ' -f2)
-[ ${SIZE_SWAP} ] || SIZE_SWAP=$(( (${MEMTOTAL} + 10) / 1024 ))
+SIZE_SWAP=$(( (${MEMTOTAL} + 10) / 1024 ))
+SIZE_SWAP=$(whiptail --inputbox "If HIBERNATE enabled then this will be a disk partition otherwise it will be a regular ZFS dataset. If LUKS enabled then the partition will be encrypted.\nIf SWAP size not set here (left blank), then it will be calculated to accomodate memory size.\n\nSize of swap space in megabytes (default is calculated value)" \
+    --title "SWAP size" 18 70 $(echo $SIZE_SWAP) 3>&1 1>&2 2>&3)
 
 # Use zswap compressed page cache in front of swap ? https://wiki.archlinux.org/index.php/Zswap
 # Only used for swap partition (encrypted or not)
 USE_ZSWAP="\"zswap.enabled=1 zswap.compressor=lz4 zswap.max_pool_percent=25\""
 
 # Suite to install - xenial bionic
-SUITE=bionic
+SUITE=$(whiptail --title "Select Ubuntu distribtion" --radiolist "Choose distro" 20 70 2 \
+    xenial "16.04 Xenial" OFF \
+    bionic "18.04 Bionic" ON 3>&1 1>&2 2>&3)
 
 case ${SUITE} in
 	bionic)
@@ -83,7 +137,22 @@ esac
 
 # Install HWE packages - set to blank or to "-hwe-18.04"
 # Gets tacked on to various packages below
-HWE="-hwe-${SUITENUM}"
+if [ "${HWE}" = "y" ] ; then
+    HWE="-hwe-${SUITENUM}"
+fi
+
+whiptail --title "Summary of install options" --msgbox "These are the options we're about to install with :\n\n \
+    Proxy $([ ${PROXY} ] && echo ${PROXY} || echo None)\n \
+    $(echo $SUITE $SUITENUM) $([ ${HWE} ] && echo WITH || echo without) $(echo hwe kernel ${HWE})\n \
+    Disk $(echo $DISK | sed 's!/dev/disk/by-id/!!')\n \
+    Hostname $(echo $HOSTNAME)\n \
+    User $(echo $USERNAME $UCOMMENT)\n\n \
+    DESKTOP   = $(echo $DESKTOP)  : Install full Ubuntu desktop\n \
+    UEFI      = $(echo $UEFI)  : Enable UEFI\n \
+    LUKS      = $(echo $LUKS)  : Enable LUKS disk encryption\n \
+    HIBERNATE = $(echo $HIBERNATE)  : Enable SWAP disk partition for hibernation\n \
+    Swap size = $(echo $SIZE_SWAP)M\n" \
+    25 70
 
 # Log everything we do
 rm -f /root/ZFS-setup.log
