@@ -53,6 +53,12 @@ fi
 # Ignore cdrom etc.
 readarray -t disks <<< $(ls -l /dev/disk/by-id | egrep -v '(CDROM|CDRW|-ROM|CDDVD|-part|md-|dm-|wwn-)' | sort -t '/' -k3 | tr -s " " | cut -d' ' -f9 | sed '/^$/d')
 
+# If no disks available (kvm needs to use scsi, not virtio) then error out
+if [ ${#disks[@]} -eq 0 ] ; then
+    whiptail --title "No disks available in /dev/disk/by-id" --msgbox "No valid disk links were found in /dev/disk/by-id - ensure your target disk has a link in that directory.\n\nKVM/qemu VMs need to use the SCSI storage driver, not the default virtio one (which does not create links in /dev/disk/by-id)" 12 70
+    exit 1
+fi
+
 TMPFILE=$(mktemp)
 whiptail --title "List of disks" --radiolist --noitem \
     "Choose disk to install to" 20 70 12 \
@@ -64,11 +70,6 @@ if [ "${DISK}" = "" ] ; then
 fi
 DISK="/dev/disk/by-id/${DISK}"
 
-DESKTOP=n
-UEFI=n
-LUKS=n
-HWE=n
-HIBERNATE=n
 # Set basic options for install
 whiptail --title "Set options to install" --separate-output --checklist "Choose options" 20 65 6 \
     DESKTOP "Install full Ubuntu desktop" OFF \
@@ -76,11 +77,16 @@ whiptail --title "Set options to install" --separate-output --checklist "Choose 
     LUKS "Enable full disk encryption" OFF \
     HWE "Install Hardware Enablement kernel" ON \
     HIBERNATE "Enable swap partition for hibernation" OFF 2>"${TMPFILE}"
-cat "${TMPFILE}"
+
+# Set any selected options to 'y'
 while read -r TODO ; do
-    OPTION="${TODO}"
     eval "${TODO}"='y'
 done < "${TMPFILE}"
+
+# Any options not enabled in the basic options menu we now set to 'n'
+for option in DESKTOP UEFI LUKS HWE HIBERNATE ; do
+    [ ${!option} ] || eval "${option}"='n'
+fi
 
 # We check /sys/power/state - if no "disk" in there, then HIBERNATE is disabled
 cat /sys/power/state | fgrep disk
