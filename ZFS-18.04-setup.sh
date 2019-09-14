@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Shortened url direct to script : https://shorturl.at/AFHV2
+# Shortened url direct to script : https://shorturl.at/gvzGZ
 
 if [[ $EUID -ne 0 ]]; then
     echo "This script must be run as root" 1>&2
@@ -86,7 +86,7 @@ done < "${TMPFILE}"
 # Any options not enabled in the basic options menu we now set to 'n'
 for option in DESKTOP UEFI LUKS HWE HIBERNATE ; do
     [ ${!option} ] || eval "${option}"='n'
-fi
+done
 
 # We check /sys/power/state - if no "disk" in there, then HIBERNATE is disabled
 cat /sys/power/state | fgrep disk
@@ -128,16 +128,25 @@ case ${SUITE} in
         SUITENUM="18.04"
         SUITE_EXTRAS="netplan.io expect"
         SUITE_BOOTSTRAP="wget,whois,rsync,gdisk,netplan.io"
+        # Specific zpool features available in bionic
+        SUITE_BOOT_POOL="-o feature@userobj_accounting=enabled"
+        SUITE_ROOT_POOL="-O dnodesize=auto"
         ;;
     xenial | loki | serena)
         SUITENUM="16.04"
         SUITE_EXTRAS="openssl-blacklist openssh-blacklist openssh-blacklist-extra bootlogd"
         SUITE_BOOTSTRAP="wget,whois,rsync,gdisk"
+        # bionic features above not available in 0.6.x.x in xenial
+        SUITE_BOOT_POOL=""
+        SUITE_ROOT_POOL=""
         ;;
     *)
         SUITENUM="16.04"
         SUITE_EXTRAS="openssl-blacklist openssh-blacklist openssh-blacklist-extra bootlogd"
         SUITE_BOOTSTRAP="wget,whois,rsync,gdisk"
+        # bionic features above not available in 0.6.x.x in xenial
+        SUITE_BOOT_POOL=""
+        SUITE_ROOT_POOL=""
         ;;
 esac
 
@@ -205,11 +214,10 @@ fi #LUKS
 echo "Wait for partition info to settle out"
 sleep 5
 
-# Create boot pool - only uses features supported by grub
-# userobj_accounting not supported in 0.6.x in 16.04
+# Create boot pool - only uses features supported by grub and zfs version
 echo "Creating boot pool bpool"
 zpool create -f -o ashift=12 -d \
-      -o feature@async_destroy=enabled \
+      -o feature@async_destroy=enabled ${SUITE_BOOT_POOL} \
       -o feature@bookmarks=enabled \
       -o feature@embedded_data=enabled \
       -o feature@empty_bpobj=enabled \
@@ -217,7 +225,6 @@ zpool create -f -o ashift=12 -d \
       -o feature@extensible_dataset=enabled \
       -o feature@filesystem_limits=enabled \
       -o feature@hole_birth=enabled \
-      -o feature@userobj_accounting=enabled \
       -o feature@large_blocks=enabled \
       -o feature@lz4_compress=enabled \
       -o feature@spacemap_histogram=enabled \
@@ -234,22 +241,18 @@ if [ ${LUKS} = "y" ] ; then
     echo ${PASSPHRASE} | cryptsetup luksOpen ${DISK}-part5 root_crypt
     
     echo "Creating root pool rpool"
-    # dnodesize not supported in 0.6.x in 16.04
-    zpool create -f -o ashift=12 \
+    zpool create -f -o ashift=12 ${SUITE_ROOT_POOL} \
          -O acltype=posixacl -O canmount=off -O compression=lz4 \
          -O atime=off \
-         -O dnodesize=auto \
          -O normalization=formD -O relatime=on -O xattr=sa \
          -O mountpoint=/ -R /mnt \
          rpool /dev/mapper/root_crypt
 else
 # Unencrypted
 echo "Creating root pool rpool"
-# dnodesize not supported in 0.6.x in 16.04
-zpool create -f -o ashift=12 \
+zpool create -f -o ashift=12 ${SUITE_ROOT_POOL} \
       -O acltype=posixacl -O canmount=off -O compression=lz4 \
       -O atime=off \
-      -O dnodesize=auto \
       -O normalization=formD -O relatime=on -O xattr=sa \
       -O mountpoint=/ -R /mnt \
       rpool ${DISK}-part5
