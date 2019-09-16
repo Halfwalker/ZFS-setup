@@ -19,7 +19,7 @@ if [ ${PROXY} ]; then
     export http_proxy=${PROXY}
     export ftp_proxy=${PROXY}
     # This is for apt-get
-    echo 'Acquire::http::proxy "${PROXY}";' > /etc/apt/apt.conf.d/03proxy
+    echo "Acquire::http::proxy \"${PROXY}\";" > /etc/apt/apt.conf.d/03proxy
 fi # PROXY
 
 # Get userid and full name of main user
@@ -154,6 +154,8 @@ esac
 # Gets tacked on to various packages below
 if [ "${HWE}" = "y" ] ; then
     HWE="-hwe-${SUITENUM}"
+else
+    HWE=
 fi
 
 whiptail --title "Summary of install options" --msgbox "These are the options we're about to install with :\n\n \
