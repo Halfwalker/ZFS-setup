@@ -169,7 +169,7 @@ whiptail --title "Summary of install options" --msgbox "These are the options we
     LUKS      = $(echo $LUKS)  : Enable LUKS disk encryption\n \
     HIBERNATE = $(echo $HIBERNATE)  : Enable SWAP disk partition for hibernation\n \
     Swap size = $(echo $SIZE_SWAP)M\n" \
-    25 70
+    20 70
 
 # Log everything we do
 rm -f /root/ZFS-setup.log
@@ -445,11 +445,8 @@ fi # UEFI
 apt-get --yes install grub-pc
 
 # Install basic packages
-# jmespath stuff needed for ansible json filters - have to be installed *before*
-# running ansible - can't install via a task since that ansible run won't see
-# the newly installed jmes stuff
 apt-get --no-install-recommends --yes install expect most vim-nox rsync whois gdisk \
-    openssh-server python3-jmespath python-jmespath
+    openssh-server
 
 # Enable importing bpool
 cat >> /etc/systemd/system/zfs-import-bpool.service << 'EOF'
@@ -491,6 +488,7 @@ cat >> /etc/default/grub << EOF
 
 # Ensure both timeouts are 5s
 GRUB_RECOVERFAIL_TIMEOUT=5
+GRUB_RECORDFAIL_TIMEOUT=5
 
 # Sometimes os_prober fails with device busy. Only really needed for multi-OS
 GRUB_DISABLE_OS_PROBER=true
