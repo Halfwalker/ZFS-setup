@@ -160,6 +160,12 @@ SIZE_SWAP=$(whiptail --inputbox "If HIBERNATE enabled then this will be a disk p
 # Only used for swap partition (encrypted or not)
 USE_ZSWAP="\"zswap.enabled=1 zswap.compressor=lz4 zswap.max_pool_percent=25\""
 
+# What suite is this script running under ?  xenial or bionic
+# Xenial does not support a couple of zfs feature flags, so have to
+# not use them when creating the pools, even if the target system
+# is bionic.  Pool can be upgraded after booting into the target.
+SCRIPT_SUITE=$(lsb_release -cs)
+
 # Suite to install - xenial bionic
 SUITE=$(whiptail --title "Select Ubuntu distribtion" --radiolist "Choose distro" 20 70 2 \
     xenial "16.04 Xenial" OFF \
@@ -171,8 +177,17 @@ case ${SUITE} in
         SUITE_EXTRAS="netplan.io expect"
         SUITE_BOOTSTRAP="wget,whois,rsync,gdisk,netplan.io"
         # Specific zpool features available in bionic
-        SUITE_BOOT_POOL="-o feature@userobj_accounting=enabled"
-        SUITE_ROOT_POOL="-O dnodesize=auto"
+        # Depends on what suite this script is running under
+        case ${SCRIPT_SUITE} in
+            bionic)
+                SUITE_BOOT_POOL="-o feature@userobj_accounting=enabled"
+                SUITE_ROOT_POOL="-O dnodesize=auto"
+                ;;
+            xenial)
+                SUITE_BOOT_POOL=""
+                SUITE_ROOT_POOL=""
+                ;;
+        esac
         ;;
     xenial | loki | serena)
         SUITENUM="16.04"
