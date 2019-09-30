@@ -1,6 +1,48 @@
 #!/bin/bash
 
-# Shortened url direct to script : https://shorturl.at/gvzGZ
+#
+# This will set up a single-disk system with root-on-zfs, using
+# xenial/16/04 or bionic/18.04.
+#
+# >>>>>>>>>> NOTE: This will totally overwrite the disk chosen <<<<<<<<<<<
+#
+# 1) Boot an Ubuntu live cd to get a shell. Ubuntu desktop is a good choice.
+# 2) Open a shell (ctrl-t) and become root (sudo -i)
+# 3) Copy this script onto the box somehow - scp from somewhere
+# 4) Make it executable (chmod +x ZFS-18.04-setup.sh)
+# 5) Run it (./ZFS-18.04-setup.sh)
+#
+# It will ask a few questions (username, which disk, xenial/bionic etc)
+# and then fully install a minimal Ubuntu system. Depending on the choices
+# several partitions and zfs datasets will be created.
+# 
+# Part Name  Use
+# ===========================================================================
+#  1   GRUB  To store grub bootloader
+#  2   UEFI  uefi bootloader (if chosen to activate)
+#  3   BOOT  zfs pool (bpool) for /boot (bpool/BOOT/ubuntu) with only features
+#            grub supports enabled
+#  4   SWAP  Only created if HIBERNATE is enabled (may be encrypted with LUKS)
+#  5   ZFS   Main zfs pool (rpool) for full system (rpool/ROOT/ubuntu)
+# 
+# Datasets created
+# ================
+# bpool/BOOT/ubuntu               Contains /boot
+# bpool/BOOT/ubuntu@base_install  Snapshot of installed /boot
+# rpool/ROOT/ubuntu               Contains main system
+# rpool/ROOT/ubuntu@base_install  Snapshot of install main system
+# rpool/home                      Container for user directories
+# rpool/home/<username>           Dataset for initial user
+# 
+# One option is to enable LUKS full disk encryption. If HIBERNATE is enabled
+# and a SWAP partition created, then that will be encrypted as well.
+# 
+# NOTE: The HIBERNATE option will be disabled if the appropriate feature is not
+# enabled in the power options of the system bios (/sys/power/state)
+#
+# NOTE: If installing under KVM, then the SCSI disk driver must be used,
+#       not the virtio one. Otherwise the disks will not be linked into the
+#       /dev/disk/by-id/ directory.
 
 if [[ $EUID -ne 0 ]]; then
     echo "This script must be run as root" 1>&2
