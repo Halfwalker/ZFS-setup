@@ -20,17 +20,17 @@
 # ===========================================================================
 #  1   GRUB  To store grub bootloader
 #  2   UEFI  uefi bootloader (if chosen to activate)
-#  3   BOOT  zfs pool (bpool) for /boot (bpool/BOOT/ubuntu) with only features
+#  3   BOOT  zfs pool (bpool) for /boot (bpool/BOOT/bionic) with only features
 #            grub supports enabled
 #  4   SWAP  Only created if HIBERNATE is enabled (may be encrypted with LUKS)
-#  5   ZFS   Main zfs pool (rpool) for full system (rpool/ROOT/ubuntu)
+#  5   ZFS   Main zfs pool (rpool) for full system (rpool/ROOT/bionic)
 # 
 # Datasets created
 # ================
-# bpool/BOOT/ubuntu               Contains /boot
-# bpool/BOOT/ubuntu@base_install  Snapshot of installed /boot
-# rpool/ROOT/ubuntu               Contains main system
-# rpool/ROOT/ubuntu@base_install  Snapshot of install main system
+# bpool/BOOT/bionic               Contains /boot
+# bpool/BOOT/bionic@base_install  Snapshot of installed /boot
+# rpool/ROOT/bionic               Contains main system
+# rpool/ROOT/bionic@base_install  Snapshot of install main system
 # rpool/home                      Container for user directories
 # rpool/home/<username>           Dataset for initial user
 # 
@@ -345,11 +345,11 @@ fi #HIBERNATE
 # Main filesystem datasets
 echo "Creating main zfs datasets"
 zfs create -o canmount=off -o mountpoint=none rpool/ROOT
-zfs create -o canmount=noauto -o mountpoint=/ rpool/ROOT/ubuntu
-zfs mount rpool/ROOT/ubuntu
+zfs create -o canmount=noauto -o mountpoint=/ rpool/ROOT/${SUITE}
+zfs mount rpool/ROOT/${SUITE}
 zfs create -o canmount=off -o mountpoint=none bpool/BOOT
-zfs create -o canmount=noauto -o mountpoint=/boot bpool/BOOT/ubuntu
-zfs mount bpool/BOOT/ubuntu
+zfs create -o canmount=noauto -o mountpoint=/boot bpool/BOOT/${SUITE}
+zfs mount bpool/BOOT/${SUITE}
 
 # zfs create rpool/home and main user home dataset
 zfs create -o canmount=off -o mountpoint=none -o compression=lz4 -o atime=off rpool/home
@@ -372,7 +372,7 @@ echo "127.0.1.1  ${HOSTNAME}" >> /mnt/etc/hosts
 
 if [ ${PROXY} ]; then
     # This is for apt-get
-    echo 'Acquire::http::proxy "${PROXY}";' > /mnt/etc/apt/apt.conf.d/03proxy
+    echo "Acquire::http::proxy \"${PROXY}\";" > /mnt/etc/apt/apt.conf.d/03proxy
 fi # PROXY
 
 
@@ -537,7 +537,7 @@ read -t 5 QUIT
 update-initramfs -u -k all
 
 # Ensure grub supports ZFS and reset timeouts to 5s
-sed -i 's/GRUB_CMDLINE_LINUX=.*/GRUB_CMDLINE_LINUX="net.ifnames=0 biosdevname=0 root=ZFS=rpool\/ROOT\/ubuntu"/' /etc/default/grub
+sed -i "s/GRUB_CMDLINE_LINUX=.*/GRUB_CMDLINE_LINUX=\"net.ifnames=0 biosdevname=0 root=ZFS=rpool\/ROOT\/${SUITE}\"/" /etc/default/grub
 sed -i 's/GRUB_TIMEOUT_STYLE=hidden/# GRUB_TIMEOUT_STYLE=hidden/' /etc/default/grub
 sed -i 's/GRUB_TIMEOUT=0/GRUB_TIMEOUT=5/' /etc/default/grub
 sed -i 's/#GRUB_TERMINAL.*/GRUB_TERMINAL=console/' /etc/default/grub
@@ -624,8 +624,8 @@ update-grub
 update-initramfs -c -k all
 
 # Fix filesystem mount ordering
-zfs set mountpoint=legacy bpool/BOOT/ubuntu
-echo bpool/BOOT/ubuntu /boot zfs \
+zfs set mountpoint=legacy bpool/BOOT/${SUITE}
+echo bpool/BOOT/${SUITE} /boot zfs \
   nodev,relatime,x-systemd.requires=zfs-import-bpool.service 0 0 >> /etc/fstab
 
 # zfs set mountpoint=legacy rpool/var/log
@@ -635,8 +635,8 @@ echo bpool/BOOT/ubuntu /boot zfs \
 # echo rpool/var/spool /var/spool zfs nodev,relatime 0 0 >> /etc/fstab
 
 # Create install snaps
-zfs snapshot bpool/BOOT/ubuntu@base_install
-zfs snapshot rpool/ROOT/ubuntu@base_install
+zfs snapshot bpool/BOOT/${SUITE}@base_install
+zfs snapshot rpool/ROOT/${SUITE}@base_install
 
 # End of Setup.sh
 __EOF__
