@@ -52,6 +52,11 @@ fi
 # No magenta overrides for whiptail dialogs please
 export NEWT_COLORS="none"
 
+# If using grub, then dnodesize must be set to "legacy", not "auto"
+# Only needed for bootfs setting, which is needed for zedenv
+# https://github.com/johnramsden/zedenv
+DNODESIZE=legacy
+
 # If there's a local apt-cacher-ng setup, use for speed
 PROXY="http://192.168.2.104:3142/"
 PROXY=$(whiptail --inputbox "Enter an apt proxy. Cancel or hit <esc> for no proxy" --title "APT proxy setup" 8 70 $(echo $PROXY) 3>&1 1>&2 2>&3)
@@ -82,13 +87,23 @@ UPASSWORD="$PW1"
 
 # Hostname - cancel or blank name will exit
 HOSTNAME=dattotest
-HOSTNAME=$(whiptail --inputbox "Enter hostname to be used for new system" --title "Hostname for new system" 8 70 $(echo $HOSTNAME) 3>&1 1>&2 2>&3)
+HOSTNAME=$(whiptail --inputbox "Enter hostname to be used for new system. This name may also be used for the main ZFS poolname." --title "Hostname for new system." 8 70 $(echo $HOSTNAME) 3>&1 1>&2 2>&3)
 RET=${?}
 (( RET )) && HOSTNAME=
 if [ ! ${HOSTNAME} ]; then
     echo "Must have a hostname" 
     exit 1
 fi
+
+POOLNAME=${HOSTNAME}
+POOLNAME=$(whiptail --inputbox "Enter poolname to use for ZFS - defaults to hostname" --title "ZFS poolname" 8 70 $(echo $POOLNAME) 3>&1 1>&2 2>&3)
+RET=${?}
+(( RET )) && POOLNAME=
+if [ ! ${POOLNAME} ]; then
+    echo "Must have a ZFS poolname"
+    exit 1
+fi
+
 
 # Set main disk here - be sure to include the FULL path
 # Get list of disks, ask user which one to install to
@@ -181,7 +196,7 @@ case ${SUITE} in
         case ${SCRIPT_SUITE} in
             bionic)
                 SUITE_BOOT_POOL="-o feature@userobj_accounting=enabled"
-                SUITE_ROOT_POOL="-O dnodesize=auto"
+                SUITE_ROOT_POOL="-O dnodesize=${DNODESIZE}"
                 ;;
             xenial)
                 SUITE_BOOT_POOL=""
@@ -220,6 +235,7 @@ whiptail --title "Summary of install options" --msgbox "These are the options we
     $(echo $SUITE $SUITENUM) $([ ${HWE} ] && echo WITH || echo without) $(echo hwe kernel ${HWE})\n \
     Disk $(echo $DISK | sed 's!/dev/disk/by-id/!!')\n \
     Hostname $(echo $HOSTNAME)\n \
+    Poolname $(echo $POOLNAME)\n \
     User $(echo $USERNAME $UCOMMENT)\n\n \
     DESKTOP   = $(echo $DESKTOP)  : Install full Ubuntu desktop\n \
     UEFI      = $(echo $UEFI)  : Enable UEFI\n \
@@ -299,22 +315,22 @@ if [ ${LUKS} = "y" ] ; then
     echo ${PASSPHRASE} | cryptsetup luksFormat --type luks2 -c aes-xts-plain64 -s 512 -h sha256 ${DISK}-part5
     echo ${PASSPHRASE} | cryptsetup luksOpen ${DISK}-part5 root_crypt
     
-    echo "Creating root pool rpool"
+    echo "Creating root pool ${POOLNAME}"
     zpool create -f -o ashift=12 ${SUITE_ROOT_POOL} \
          -O acltype=posixacl -O canmount=off -O compression=lz4 \
          -O atime=off \
          -O normalization=formD -O relatime=on -O xattr=sa \
          -O mountpoint=/ -R /mnt \
-         rpool /dev/mapper/root_crypt
+         ${POOLNAME} /dev/mapper/root_crypt
 else
 # Unencrypted
-echo "Creating root pool rpool"
+    echo "Creating root pool ${POOLNAME}"
 zpool create -f -o ashift=12 ${SUITE_ROOT_POOL} \
       -O acltype=posixacl -O canmount=off -O compression=lz4 \
       -O atime=off \
       -O normalization=formD -O relatime=on -O xattr=sa \
       -O mountpoint=/ -R /mnt \
-      rpool ${DISK}-part5
+      ${POOLNAME} ${DISK}-part5
 fi # LUKS
 
 # Create SWAP volume
@@ -337,32 +353,35 @@ else
     zfs create -V ${SIZE_SWAP}M -b $(getconf PAGESIZE) -o compression=zle \
       -o logbias=throughput -o sync=always \
       -o primarycache=metadata -o secondarycache=none \
-      -o com.sun:auto-snapshot=false rpool/swap
-    mkswap -f /dev/zvol/rpool/swap
+      -o com.sun:auto-snapshot=false ${POOLNAME}/swap
+    mkswap -f /dev/zvol/${POOLNAME}/swap
 fi #HIBERNATE
 
 
 # Main filesystem datasets
 echo "Creating main zfs datasets"
-zfs create -o canmount=off -o mountpoint=none rpool/ROOT
-zfs create -o canmount=noauto -o mountpoint=/ rpool/ROOT/${SUITE}
-zfs mount rpool/ROOT/${SUITE}
+zfs create -o canmount=off -o mountpoint=none ${POOLNAME}/ROOT
+zfs create -o canmount=noauto -o mountpoint=/ ${POOLNAME}/ROOT/${SUITE}
+zfs mount ${POOLNAME}/ROOT/${SUITE}
 zfs create -o canmount=off -o mountpoint=none bpool/BOOT
 zfs create -o canmount=noauto -o mountpoint=/boot bpool/BOOT/${SUITE}
 zfs mount bpool/BOOT/${SUITE}
 
 # zfs create rpool/home and main user home dataset
-zfs create -o canmount=off -o mountpoint=none -o compression=lz4 -o atime=off rpool/home
-zfs create -o canmount=on -o mountpoint=/home/${USERNAME} rpool/home/${USERNAME}
+zfs create -o canmount=off -o mountpoint=none -o compression=lz4 -o atime=off ${POOLNAME}/home
+zfs create -o canmount=on -o mountpoint=/home/${USERNAME} ${POOLNAME}/home/${USERNAME}
 
 # Show what we got before installing
+echo "---------- $(tput setaf 1)About to debootstrap into /mnt/zfs$(tput sgr0) -----------"
 zfs list -t all
 df -h
+echo "---------- $(tput setaf 1)About to debootstrap into /mnt/zfs$(tput sgr0) -----------"
+read -t 10 QUIT
 
 # Install basic system
 echo "debootstrap to build initial system"
 debootstrap ${SUITE} /mnt
-zfs set devices=off rpool
+zfs set devices=off ${POOLNAME}
 
 # If this system will use Docker (which manages its own datasets & snapshots):
 zfs create -o com.sun:auto-snapshot=false -o mountpoint=/var/lib/docker rpool/docker
@@ -426,6 +445,8 @@ cat > /mnt/root/Setup.sh << __EOF__
 #!/bin/bash
 
 export DISK=${DISK}
+export SUITE=${SUITE}
+export POOLNAME=${POOLNAME}
 export USERNAME=${USERNAME}
 export UPASSWORD="${UPASSWORD}"
 export UCOMMENT="${UCOMMENT}"
@@ -537,7 +558,7 @@ read -t 5 QUIT
 update-initramfs -u -k all
 
 # Ensure grub supports ZFS and reset timeouts to 5s
-sed -i "s/GRUB_CMDLINE_LINUX=.*/GRUB_CMDLINE_LINUX=\"net.ifnames=0 biosdevname=0 root=ZFS=rpool\/ROOT\/${SUITE}\"/" /etc/default/grub
+sed -i "s/GRUB_CMDLINE_LINUX=.*/GRUB_CMDLINE_LINUX=\"net.ifnames=0 biosdevname=0 root=ZFS=${POOLNAME}\/ROOT\/${SUITE}\"/" /etc/default/grub
 sed -i 's/GRUB_TIMEOUT_STYLE=hidden/# GRUB_TIMEOUT_STYLE=hidden/' /etc/default/grub
 sed -i 's/GRUB_TIMEOUT=0/GRUB_TIMEOUT=5/' /etc/default/grub
 sed -i 's/#GRUB_TERMINAL.*/GRUB_TERMINAL=console/' /etc/default/grub
@@ -565,7 +586,7 @@ if [ ${HIBERNATE} = "y" ] ; then
 else
     # No swap partition
     sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT.*/GRUB_CMDLINE_LINUX_DEFAULT="quiet splash"/' /etc/default/grub
-    echo "/dev/zvol/rpool/swap none swap discard,sw 0 0" >> /etc/fstab
+    echo "/dev/zvol/${POOLNAME}/swap none swap discard,sw 0 0" >> /etc/fstab
     echo "RESUME=none" > /etc/initramfs-tools/conf.d/resume
 fi # HIBERNATE
 
@@ -578,7 +599,7 @@ if [ "${UEFI}" = "y" ] ; then
       --bootloader-id=ubuntu --recheck --no-floppy ${DISK}
     umount /boot/efi
 fi # UEFI
-    grub-install --target=i386-pc ${DISK}
+grub-install --target=i386-pc ${DISK}
 
 apt-get --yes dist-upgrade
 
@@ -629,10 +650,10 @@ echo bpool/BOOT/${SUITE} /boot zfs \
   nodev,relatime,x-systemd.requires=zfs-import-bpool.service 0 0 >> /etc/fstab
 
 # zfs set mountpoint=legacy rpool/var/log
-# echo rpool/var/log /var/log zfs nodev,relatime 0 0 >> /etc/fstab
+# echo ${POOLNAME}/var/log /var/log zfs nodev,relatime 0 0 >> /etc/fstab
 # 
 # zfs set mountpoint=legacy rpool/var/spool
-# echo rpool/var/spool /var/spool zfs nodev,relatime 0 0 >> /etc/fstab
+# echo ${POOLNAME}/var/spool /var/spool zfs nodev,relatime 0 0 >> /etc/fstab
 
 # Create install snaps
 zfs snapshot bpool/BOOT/${SUITE}@base_install
@@ -648,7 +669,7 @@ chroot /mnt /bin/bash --login -c /root/Setup.sh
 
 # Copy setup log
 cp /root/ZFS-setup.log /mnt/home/${USERNAME}
-zfs umount rpool/home/${USERNAME}
+zfs umount ${POOLNAME}/home/${USERNAME}
 
 # Remove any lingering crash reports
 rm -f /mnt/var/crash/*
