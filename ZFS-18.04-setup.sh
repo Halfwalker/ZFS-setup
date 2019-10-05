@@ -398,7 +398,7 @@ fi # PROXY
 # Set up networking for netplan or interfaces
 # renderer: networkd is for text mode only, use NetworkManager for gnome
 if [ ${SUITE} == bionic ] ; then
-cat >> /mnt/etc/netplan/01_netcfg.yaml << __EOF__
+cat > /mnt/etc/netplan/01_netcfg.yaml << __EOF__
 network:
   version: 2
   renderer: networkd
@@ -430,15 +430,6 @@ deb-src http://security.ubuntu.com/ubuntu ${SUITE}-security main universe multiv
 deb http://archive.ubuntu.com/ubuntu ${SUITE}-updates main universe multiverse
 deb-src http://archive.ubuntu.com/ubuntu ${SUITE}-updates main universe multiverse
 EOF
-
-# Bind mount virtual filesystem, create Setup.sh, then chroot
-mount --rbind /dev  /mnt/dev
-mount --rbind /proc /mnt/proc
-mount --rbind /sys  /mnt/sys
-# Make the mounts rslaves to make umounting later cleaner
-mount –make-rslave /mnt/dev
-mount –make-rslave /mnt/proc
-mount –make-rslave /mnt/sys
 
 echo "Creating Setup.sh in new system for chroot"
 cat > /mnt/root/Setup.sh << __EOF__
@@ -475,6 +466,7 @@ grub-pc         grub-pc/install_devices_empty   select true
 grub-pc         grub-pc/install_devices         select
 grub-installer/bootdev string ${DISK}
 grub-pc grub-pc/install_devices string ${DISK}
+console-setup   console-setup/codeset47 select  # Latin1 and Latin5 - western Europe and Turkic languages
 EOFPRE
 
 # Set up locale - must set langlocale variable (defaults to en_US)
@@ -519,7 +511,7 @@ if [ "${UEFI}" = "y" ] ; then
     mount /boot/efi
     apt-get install --yes grub-efi-amd64-signed shim-signed
 fi # UEFI
-    # Grub for legacy BIOS
+# Grub for legacy BIOS
 apt-get --yes install grub-pc
 
 # Install basic packages
@@ -664,19 +656,29 @@ __EOF__
 
 chmod +x /mnt/root/Setup.sh
 
-# chroot and set up system
-chroot /mnt /bin/bash --login -c /root/Setup.sh
+# Bind mount virtual filesystem, create Setup.sh, then chroot
+mount --bind /sys  /mnt/sys
+mount --bind /dev  /mnt/dev
+mount -t proc /proc /mnt/proc
+# Make the mounts rslaves to make umounting later cleaner
+# mount --make-rslave /mnt/dev
+# mount --make-rslave /mnt/proc
+# mount --make-rslave /mnt/sys
 
-# Copy setup log
-cp /root/ZFS-setup.log /mnt/home/${USERNAME}
-zfs umount ${POOLNAME}/home/${USERNAME}
+# chroot and set up system
+# chroot /mnt /bin/bash --login -c /root/Setup.sh
+unshare --mount --fork chroot /mnt /bin/bash --login -c /root/Setup.sh
 
 # Remove any lingering crash reports
 rm -f /mnt/var/crash/*
 
-umount /mnt/dev
-umount /mnt/proc
-umount /mnt/sys
+umount -n /mnt/proc
+umount -n /mnt/dev
+umount -n /mnt/sys
+
+# Copy setup log
+cp /root/ZFS-setup.log /mnt/home/${USERNAME}
+zfs umount ${POOLNAME}/home/${USERNAME}
 
 # Back in livecd - unmount filesystems
 mount | grep -v zfs | tac | awk '/\/mnt/ {print $3}' | xargs -i{} umount -lf {}
