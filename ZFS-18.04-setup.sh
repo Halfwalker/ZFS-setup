@@ -128,10 +128,10 @@ fi
 DISK="/dev/disk/by-id/${DISK}"
 
 # Set basic options for install
-whiptail --title "Set options to install" --separate-output --checklist "Choose options" 20 65 6 \
+whiptail --title "Set options to install" --separate-output --checklist "Choose options\n\nNOTE: Enabling HWE kernel requires pool attribute dnodesize=legacy" 20 65 6 \
     UEFI "Enable UEFI grub install" $( [ -d /sys/firmware/efi ] && echo ON || echo OFF ) \
     LUKS "Enable full disk encryption" OFF \
-    HWE "Install Hardware Enablement kernel" ON \
+    HWE "Install Hardware Enablement kernel" OFF \
     HIBERNATE "Enable swap partition for hibernation" OFF \
     DESKTOP "Install full Ubuntu desktop" OFF 2>"${TMPFILE}"
 
