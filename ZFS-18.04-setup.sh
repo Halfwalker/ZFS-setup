@@ -182,15 +182,39 @@ USE_ZSWAP="\"zswap.enabled=1 zswap.compressor=lz4 zswap.max_pool_percent=25\""
 SCRIPT_SUITE=$(lsb_release -cs)
 
 # Suite to install - xenial bionic
-SUITE=$(whiptail --title "Select Ubuntu distribtion" --radiolist "Choose distro" 20 70 2 \
+SUITE=$(whiptail --title "Select Ubuntu distribtion" --radiolist "Choose distro" 20 70 5 \
     xenial "16.04 Xenial" OFF \
-    bionic "18.04 Bionic" ON 3>&1 1>&2 2>&3)
+    bionic "18.04 Bionic" OFF \
+    disco "19.04 Disco" ON \
+    3>&1 1>&2 2>&3)
 
 case ${SUITE} in
-	bionic)
-        SUITENUM="18.04"
+	disco)
+        SUITE_NUM="19.04"
         SUITE_EXTRAS="netplan.io expect"
         SUITE_BOOTSTRAP="wget,whois,rsync,gdisk,netplan.io"
+        # No HWE packages for disco/19.04 yet
+        HWE=
+        # Specific zpool features available in bionic
+        # Depends on what suite this script is running under
+        case ${SCRIPT_SUITE} in
+            bionic | disco)
+                SUITE_BOOT_POOL="-o feature@userobj_accounting=enabled"
+                SUITE_ROOT_POOL="-O dnodesize=${DNODESIZE}"
+                ;;
+            xenial)
+                SUITE_BOOT_POOL=""
+                SUITE_ROOT_POOL=""
+                ;;
+        esac
+        ;;
+	bionic)
+        SUITE_NUM="18.04"
+        SUITE_EXTRAS="netplan.io expect"
+        SUITE_BOOTSTRAP="wget,whois,rsync,gdisk,netplan.io"
+        # Install HWE packages - set to blank or to "-hwe-18.04"
+        # Gets tacked on to various packages below
+        [ "${HWE}" = "y" ] && HWE="-hwe-${SUITE_NUM}"
         # Specific zpool features available in bionic
         # Depends on what suite this script is running under
         case ${SCRIPT_SUITE} in
@@ -205,34 +229,28 @@ case ${SUITE} in
         esac
         ;;
     xenial | loki | serena)
-        SUITENUM="16.04"
+        SUITE_NUM="16.04"
         SUITE_EXTRAS="openssl-blacklist openssh-blacklist openssh-blacklist-extra bootlogd"
         SUITE_BOOTSTRAP="wget,whois,rsync,gdisk"
+        [ "${HWE}" = "y" ] && HWE="-hwe-${SUITE_NUM}" || HWE=
         # bionic features above not available in 0.6.x.x in xenial
         SUITE_BOOT_POOL=""
         SUITE_ROOT_POOL=""
         ;;
     *)
-        SUITENUM="16.04"
+        SUITE_NUM="16.04"
         SUITE_EXTRAS="openssl-blacklist openssh-blacklist openssh-blacklist-extra bootlogd"
         SUITE_BOOTSTRAP="wget,whois,rsync,gdisk"
+        [ "${HWE}" = "y" ] && HWE="-hwe-${SUITE_NUM}" || HWE=
         # bionic features above not available in 0.6.x.x in xenial
         SUITE_BOOT_POOL=""
         SUITE_ROOT_POOL=""
         ;;
 esac
 
-# Install HWE packages - set to blank or to "-hwe-18.04"
-# Gets tacked on to various packages below
-if [ "${HWE}" = "y" ] ; then
-    HWE="-hwe-${SUITENUM}"
-else
-    HWE=
-fi
-
 whiptail --title "Summary of install options" --msgbox "These are the options we're about to install with :\n\n \
     Proxy $([ ${PROXY} ] && echo ${PROXY} || echo None)\n \
-    $(echo $SUITE $SUITENUM) $([ ${HWE} ] && echo WITH || echo without) $(echo hwe kernel ${HWE})\n \
+    $(echo $SUITE $SUITE_NUM) $([ ${HWE} ] && echo WITH || echo without) $(echo hwe kernel ${HWE})\n \
     Disk $(echo $DISK | sed 's!/dev/disk/by-id/!!')\n \
     Hostname $(echo $HOSTNAME)\n \
     Poolname $(echo $POOLNAME)\n \
@@ -384,7 +402,7 @@ debootstrap ${SUITE} /mnt
 zfs set devices=off ${POOLNAME}
 
 # If this system will use Docker (which manages its own datasets & snapshots):
-zfs create -o com.sun:auto-snapshot=false -o mountpoint=/var/lib/docker rpool/docker
+zfs create -o com.sun:auto-snapshot=false -o mountpoint=/var/lib/docker ${POOLNAME}/docker
 
 echo ${HOSTNAME} > /mnt/etc/hostname
 echo "127.0.1.1  ${HOSTNAME}" >> /mnt/etc/hosts
@@ -397,7 +415,7 @@ fi # PROXY
 
 # Set up networking for netplan or interfaces
 # renderer: networkd is for text mode only, use NetworkManager for gnome
-if [ ${SUITE} == bionic ] ; then
+if [ ${SUITE} != xenial ] ; then
 cat > /mnt/etc/netplan/01_netcfg.yaml << __EOF__
 network:
   version: 2
@@ -649,7 +667,7 @@ echo bpool/BOOT/${SUITE} /boot zfs \
 
 # Create install snaps
 zfs snapshot bpool/BOOT/${SUITE}@base_install
-zfs snapshot rpool/ROOT/${SUITE}@base_install
+zfs snapshot ${POOLNAME}/ROOT/${SUITE}@base_install
 
 # End of Setup.sh
 __EOF__
@@ -679,6 +697,7 @@ umount -n /mnt/sys
 # Copy setup log
 cp /root/ZFS-setup.log /mnt/home/${USERNAME}
 zfs umount ${POOLNAME}/home/${USERNAME}
+zfs umount ${POOLNAME}/docker
 
 # Back in livecd - unmount filesystems
 mount | grep -v zfs | tac | awk '/\/mnt/ {print $3}' | xargs -i{} umount -lf {}
