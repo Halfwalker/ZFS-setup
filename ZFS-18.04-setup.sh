@@ -108,7 +108,7 @@ fi
 # Set main disk here - be sure to include the FULL path
 # Get list of disks, ask user which one to install to
 # Ignore cdrom etc.
-readarray -t disks <<< $(ls -l /dev/disk/by-id | egrep -v '(CDROM|CDRW|-ROM|CDDVD|-part|md-|dm-|wwn-)' | sort -t '/' -k3 | tr -s " " | cut -d' ' -f9 | sed '/^$/d')
+readarray -t disks < <(ls -l /dev/disk/by-id | egrep -v '(CDROM|CDRW|-ROM|CDDVD|-part|md-|dm-|wwn-)' | sort -t '/' -k3 | tr -s " " | cut -d' ' -f9 | sed '/^$/d')
 
 # If no disks available (kvm needs to use scsi, not virtio) then error out
 if [ ${#disks[@]} -eq 0 ] ; then
@@ -214,7 +214,7 @@ case ${SUITE} in
         SUITE_BOOTSTRAP="wget,whois,rsync,gdisk,netplan.io"
         # Install HWE packages - set to blank or to "-hwe-18.04"
         # Gets tacked on to various packages below
-        [ "${HWE}" = "y" ] && HWE="-hwe-${SUITE_NUM}"
+        [ "${HWE}" = "y" ] && HWE="-hwe-${SUITE_NUM}" || HWE=
         # Specific zpool features available in bionic
         # Depends on what suite this script is running under
         case ${SCRIPT_SUITE} in
